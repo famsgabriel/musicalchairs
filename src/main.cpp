@@ -44,19 +44,34 @@ public:
         : num_jogadores(num_jogadores), cadeiras(num_jogadores - 1) {}
 
     void iniciar_rodada() {
-        // TODO: Inicia uma nova rodada, removendo uma cadeira e ressincronizando o semáforo
+        this->cadeiras = num_jogadores - 1;// TODO: Inicia uma nova rodada, removendo uma cadeira e ressincronizando o semáforo
+        cadeira_sem.release(cadeiras);
     }
 
     void parar_musica() {
-        // TODO: Simula o momento em que a música para e notifica os jogadores via variável de condição
+        std::cout << "------------------------------------------\n A música acabou de parar \n------------------------------------------";
+        musica_parada = true;
+        music_cv.notify_all();// TODO: Simula o momento em que a música para e notifica os jogadores via variável de condição
     }
 
     void eliminar_jogador(int jogador_id) {
-        // TODO: Elimina um jogador que não conseguiu uma cadeira
+        
+        std::cout << "Jogador " << jogador_id << " foi eliminado." << std::endl;
+        this->num_jogadores--;// TODO: Elimina um jogador que não conseguiu uma cadeira
     }
 
     void exibir_estado() {
         // TODO: Exibe o estado atual das cadeiras e dos jogadores
+    }
+    int conta_cadeiras_rodada(){
+        this->cadeiras--;
+        return this->cadeiras;
+    }
+    int get_cadeiras(){
+        return this->cadeiras;
+    }
+    int get_jogadores(){
+        return this->num_jogadores;
     }
 
 private:
@@ -70,21 +85,38 @@ public:
         : id(id), jogo(jogo) {}
 
     void tentar_ocupar_cadeira() {
-        // TODO: Tenta ocupar uma cadeira utilizando o semáforo contador quando a música para (aguarda pela variável de condição)
-    }
-
-    void verificar_eliminacao() {
-        // TODO: Verifica se foi eliminado após ser destravado do semáforo
-    }
-
-    void joga() {
-        // TODO: Aguarda a música parar usando a variavel de condicao
         
-        // TODO: Tenta ocupar uma cadeira
+        cadeira_sem.acquire();
+        this->jogo.conta_cadeiras_rodada();
+    }
 
+    int verificar_eliminacao() {
+        if(this->jogo.get_cadeiras() == 0){
+            this->jogo.eliminar_jogador(this->id);
+            return 1;
+        }
+        return 0;
+    }
+        // TODO: Verifica se foi eliminado após ser destravado do semáforo
+
+    int get_id(){
+        return this->id;
+    }
+    void joga() {
+
+        while(this->jogo.get_jogadores() != 1){
+        // TODO: Aguarda a música parar usando a variavel de condicao
+        std::unique_lock<std::mutex> lock(music_mutex);
+        music_cv.wait(lock);
+        // TODO: Tenta ocupar uma cadeira
+            tentar_ocupar_cadeira();
         
         // TODO: Verifica se foi eliminado
-
+            int eliminado = verificar_eliminacao();
+            if(eliminado){
+                break;
+            }
+        }
     }
 
 private:
@@ -98,12 +130,23 @@ public:
         : jogo(jogo) {}
 
     void iniciar_jogo() {
+        while(this->jogo.get_jogadores() != 1){
+        std::cout << "------------------------------------------\n A música acabou de começar \n------------------------------------------";
+        jogo_ativo = true;
+        musica_parada = false;
+        //Começar jogo
+        int sleeptime = 2 + (rand() % 6); // Gera um período aleatório dentre 2 e 7 segundos
+        std::this_thread::sleep_for(std::chrono::seconds(sleeptime)); // Espera
+        //Sinaliza todos
+        this->jogo.parar_musica();
         // TODO: Começa o jogo, dorme por um período aleatório, e então para a música, sinalizando os jogadores 
+        this->jogo.iniciar_rodada();
+        }
     }
 
     void liberar_threads_eliminadas() {
         // Libera múltiplas permissões no semáforo para destravar todas as threads que não conseguiram se sentar
-        cadeira_sem.release(NUM_JOGADORES - 1); // Libera o número de permissões igual ao número de jogadores que ficaram esperando
+        cadeira_sem.release(1); // Libera o número de permissões igual ao número de jogadores que ficaram esperando - Em tese sempre é so um jogador que fica esperando já que num cadeiras = num jogadores - 1
     }
 
 private:
@@ -112,6 +155,13 @@ private:
 
 // Main function
 int main() {
+    std::srand(static_cast<unsigned int>(std::time(0))); //Seed random
+
+    std::cout << "-----------------------------------------------\n";
+    std::cout << "Bem-vindo ao Jogo das Cadeiras Concorrente!\n";
+    std::cout << "-----------------------------------------------\n";
+    std::cout << "O jogo iniciou com " << NUM_JOGADORES << " jogadores e " << NUM_JOGADORES-1 <<" cadeiras\n";
+
     JogoDasCadeiras jogo(NUM_JOGADORES);
     Coordenador coordenador(jogo);
     std::vector<std::thread> jogadores;
