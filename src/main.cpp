@@ -15,6 +15,8 @@ std::condition_variable music_cv;
 std::mutex music_mutex;
 std::atomic<bool> musica_parada{false};
 std::atomic<bool> jogo_ativo{true};
+std::counting_semaphore<1> next_round_sem(0); //Semáforo para que o jogo indique ao coordenador que pode começar a música novamente
+std::mutex chair_fill;
 
 /*
  * Uso básico de um counting_semaphore em C++:
@@ -49,7 +51,7 @@ public:
     }
 
     void parar_musica() {
-        std::cout << "------------------------------------------\n A música acabou de parar \n------------------------------------------";
+        std::cout << "\n------------------------------------------\n A música acabou de parar \n------------------------------------------\n";
         musica_parada = true;
         music_cv.notify_all();// TODO: Simula o momento em que a música para e notifica os jogadores via variável de condição
     }
@@ -58,13 +60,16 @@ public:
         
         std::cout << "Jogador " << jogador_id << " foi eliminado." << std::endl;
         this->num_jogadores--;// TODO: Elimina um jogador que não conseguiu uma cadeira
+        next_round_sem.release(); //Após a eliminação, avisa que a música pode começar novamente
     }
 
     void exibir_estado() {
         // TODO: Exibe o estado atual das cadeiras e dos jogadores
     }
     int conta_cadeiras_rodada(){
+        chair_fill.lock();
         this->cadeiras--;
+        chair_fill.unlock();
         return this->cadeiras;
     }
     int get_cadeiras(){
@@ -91,8 +96,7 @@ public:
     }
 
     int verificar_eliminacao() {
-        if(this->jogo.get_cadeiras() == 0){
-            this->jogo.eliminar_jogador(this->id);
+        if(this->jogo.get_cadeiras() == -1){
             return 1;
         }
         return 0;
@@ -104,18 +108,21 @@ public:
     }
     void joga() {
 
-        while(this->jogo.get_jogadores() != 1){
+        while(this->jogo.get_jogadores() != 1 && jogo_ativo){
         // TODO: Aguarda a música parar usando a variavel de condicao
+        if(!jogo_ativo) break;
         std::unique_lock<std::mutex> lock(music_mutex);
         music_cv.wait(lock);
+        if(!jogo_ativo) break;
         // TODO: Tenta ocupar uma cadeira
-            tentar_ocupar_cadeira();
-        
+        tentar_ocupar_cadeira();
         // TODO: Verifica se foi eliminado
-            int eliminado = verificar_eliminacao();
-            if(eliminado){
+            if(this->verificar_eliminacao()){
+                this->jogo.eliminar_jogador(this->id);
                 break;
+                std::cout << "Break não funcionou apesar de eliminado, Thread continua executando\n";
             }
+            std::cout << "Jogador " << this->id << " conseguiu se sentar nessa rodada\n";
         }
     }
 
@@ -130,16 +137,25 @@ public:
         : jogo(jogo) {}
 
     void iniciar_jogo() {
-        while(this->jogo.get_jogadores() != 1){
-        std::cout << "------------------------------------------\n A música acabou de começar \n------------------------------------------";
-        jogo_ativo = true;
+        while(jogo_ativo) {
+        std::cout << "\n------------------------------------------\n A música acabou de começar \n------------------------------------------\n";
         musica_parada = false;
         //Começar jogo
         int sleeptime = 2 + (rand() % 6); // Gera um período aleatório dentre 2 e 7 segundos
         std::this_thread::sleep_for(std::chrono::seconds(sleeptime)); // Espera
         //Sinaliza todos
         this->jogo.parar_musica();
-        // TODO: Começa o jogo, dorme por um período aleatório, e então para a música, sinalizando os jogadores 
+        // TODO: Começa o jogo, dorme por um período aleatório, e então para a música, sinalizando os jogadores
+        this->liberar_threads_eliminadas();
+        next_round_sem.acquire();
+        std::cout << "A quantidade de jogadores restantes para a próxima rodada é:" << this->jogo.get_jogadores() << std::endl; 
+
+        if( this->jogo.get_jogadores()==1){
+            jogo_ativo = false;
+            music_cv.notify_all();
+            break;
+        }
+
         this->jogo.iniciar_rodada();
         }
     }
